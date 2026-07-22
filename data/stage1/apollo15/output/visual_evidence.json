@@ -1,0 +1,29 @@
+{
+  "georef": {
+    "image_id": "M111578606_50CM",
+    "crs": "IAU_2015:30100",
+    "transform": null,
+    "acquisition_utc": null,
+    "source": "NASA LROC NAC Orthophoto",
+    "ground_sample_distance_m": 0.5
+  },
+  "boulders": [],
+  "historical_debris_mask_path": null,
+  "shadow_fraction": 0.1814308237143786,
+  "texture_roughness": 46.58668518066406,
+  "preprocessing_report": {
+    "input_p01": 0.0,
+    "input_p99": 217.0,
+    "input_mean": 0.2937444746494293,
+    "gamma": 0.4880122683932578,
+    "shadow_fraction": 0.1814308237143786,
+    "output_mean": 0.44244198817500974
+  },
+  "model_versions": {
+    "enhancer": "classical-gamma-clahe",
+    "boulder_detector": "not-run",
+    "boulder_refiner": "not-run",
+    "debris_segmenter": "not-run"
+  },
+  "evidence_kind": "visual"
+}
