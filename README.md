@@ -54,3 +54,97 @@ This will automatically:
 2. Run the slope failure physics engine.
 3. Train the XGBoost Hazard Predictor.
 4. Output High-Fidelity 3-Panel Physics Visualizations and Hazard Heatmaps.
+
+## Stage 1: Visual Perception
+
+Stage 1 is developed independently from the completed physics workflow. It
+enhances a lunar image before boulder detection and historic-debris
+segmentation; it reports visible evidence and does not forecast future
+landslides.
+
+Run the preprocessing pass on one LRO image:
+
+```bash
+python3 -m src.perception.cli input.tif outputs/enhanced.png --report outputs/enhancement.json
+```
+
+The next Stage 1 modules consume this enhanced image as follows:
+
+- YOLOv8 detects boulder candidates.
+- Mask R-CNN optionally refines their instance boundaries.
+- A ResNet-50 U-Net delineates evidence of historical landslide debris.
+
+All models must emit their results with the image's coordinate reference,
+affine transform, and resolution using `src.perception.contracts.VisualEvidence`.
+That is the only interface Stage 3 needs to align visual evidence with the
+completed Stage 2 output.
+
+### Training Stage 1
+
+The implementation is deliberately data-driven: models do not report boulders
+or historical debris until they have been trained on lunar annotations.
+
+```text
+data/
+├── enhancement_images/             # unlabelled low-light grayscale lunar images
+├── debris/
+│   ├── images/patch_001.png
+│   └── masks/patch_001.png          # binary historical-debris mask, same relative path
+├── boulders_yolo/
+│   ├── dataset.yaml                 # names: [boulder]
+│   ├── images/train, images/val
+│   └── labels/train, labels/val     # standard YOLO boxes
+└── boulders_instances/
+    ├── images/train/patch_001.png
+    └── masks/train/patch_001.npz    # `masks`: [N, H, W] instance-mask array
+```
+
+```bash
+# Self-supervised IllumiCurveNet-inspired curve enhancer (no paired target images)
+python3 -m src.perception.train enhancer --images data/enhancement_images --output checkpoints/enhancer.pt
+
+# Historical-debris segmentation
+python3 -m src.perception.train segmenter --images data/debris/images --masks data/debris/masks --output checkpoints/debris_unet.pt
+
+# Boulder detector and instance-boundary refinement
+python3 -m src.perception.train yolo --dataset-yaml data/boulders_yolo/dataset.yaml --output runs --epochs 100
+python3 -m src.perception.train maskrcnn --images data/boulders_instances/images --masks data/boulders_instances/masks --output checkpoints/boulder_maskrcnn.pt
+```
+
+The enhancement network is an independent, IllumiCurveNet-inspired design:
+adaptive recursive curve maps, spatial attention, dilated multi-scale context,
+and self-guided exposure/spatial/smoothness losses. It is not represented as a
+verbatim reproduction of the IJCNN 2025 paper.
+
+### Run Stage 1
+
+```bash
+python3 -m src.perception.run input.tif outputs/stage1 --image-id LROC_PATCH_001 \
+  --source LROC --gsd-m 1.0 \
+  --enhancer-checkpoint checkpoints/enhancer.pt \
+  --yolo-checkpoint runs/boulder/weights/best.pt \
+  --maskrcnn-checkpoint checkpoints/boulder_maskrcnn.pt \
+  --debris-checkpoint checkpoints/debris_unet.pt
+```
+
+The output directory contains `enhanced.png`, any boulder instance masks,
+`historical_debris_mask.png`, and `visual_evidence.json`. A missing trained
+checkpoint is shown as `not-run`, never interpreted as a clear hazard result.
+
+### Fixed Stage 2 Locations
+
+Stage 1 does not alter Stage 2. It independently records the fixed locations
+already hard-coded in Stage 2: Apollo 15 (`26.13, 3.63`) and Shackleton
+(`-89.5, 0.0`). Download the registered Apollo 15 LROC input and provenance:
+
+```bash
+python3 -m src.perception.acquire apollo15 data/stage1/apollo15
+python3 -m src.perception.run data/stage1/apollo15/apollo15.png outputs/apollo15 \
+  --image-id APOLLO15_LROC_M111578606 --source LROC --gsd-m 0.5
+```
+
+The initial Apollo file is an official browse orthophoto for visual validation.
+Use the associated full-resolution GeoTIFF product for model training. The
+Shackleton coordinate intentionally requires a separately selected
+shadow-capable image product; visible-light enhancement must not invent PSR
+surface detail.

@@ -6,3 +6,7 @@ xgboost
 imbalanced-learn
 matplotlib
 seaborn
+opencv-python
+torch
+torchvision
+ultralytics

@@ -1,0 +1,13 @@
+{
+  "site": {
+    "name": "Apollo 15 Landing Site (Safe Zone)",
+    "latitude": 26.13,
+    "longitude": 3.63,
+    "stage2_kind": "safe",
+    "image_url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/EXTRAS/BROWSE/NAC_DTM/APOLLO15/NAC_DTM_APOLLO15_M111578606_50CM.BROWSE.PNG",
+    "image_kind": "LROC NAC orthophoto browse PNG (0.5 m/px product)"
+  },
+  "sha256": "4e402fc70a8da06f6c7466c6198c32bc700a2bc7af9cd1531ce10dd0eedfae08",
+  "stage2_coordinate_match": true,
+  "note": "Stage 2 is untouched. This is an independent Stage 1 input acquisition record."
+}
