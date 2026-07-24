@@ -28,7 +28,7 @@ import numpy as np
 from matplotlib.colors import LightSource
 
 from src.physics.craters import generate_crater_terrain
-from src.physics.dem_loader import LOLA_118M_URL, fetch_patch
+from src.physics.dem_loader import DEM_PRODUCTS, fetch_patch
 from src.physics.relaxation import compute_slope, simulate_mass_wasting
 
 OUTPUT_DIR = Path("figures")
@@ -60,9 +60,13 @@ SITES = (
 
 
 def _provenance(site: Site, patch, stats: dict) -> str:
+    # Must come from the patch, not a constant: the product is selected per
+    # site by latitude, so a hardcoded citation silently misattributes the
+    # data -- the exact failure this footer exists to prevent.
+    product = patch.product
+    citation = product.citation if product else "source raster (unregistered)"
     return (
-        f"Source: LRO LOLA LDEM 118 m/px global mosaic (USGS), int16 x 0.5 m scale applied  |  "
-        f"REAL TOPOGRAPHY\n"
+        f"Source: {citation}  |  REAL TOPOGRAPHY\n"
         f"{site.name}  lat {site.latitude:+.2f}  lon {site.longitude:+.2f}  |  "
         f"window {patch.elevation.shape[0]}x{patch.elevation.shape[1]} px  |  "
         f"ground sample {patch.grid_spacing_y_m:.0f} m (N-S) x {patch.grid_spacing_x_m:.0f} m (E-W), "
@@ -302,7 +306,13 @@ def render_reality_check(real_stats: list[dict]) -> None:
 
 def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Regenerating Stage 2 figures from {LOLA_118M_URL}\n")
+    # The product is chosen per site by latitude, so naming one here would be
+    # wrong for most of them; each figure states its own source in its footer.
+    print("Regenerating Stage 2 figures. Product auto-selected per site:")
+    for product in DEM_PRODUCTS:
+        print(f"  {product.resolution_m:6.1f} m/px  {product.min_latitude:+.0f}.."
+              f"{product.max_latitude:+.0f} deg  {product.name}")
+    print()
     collected = []
     for site in SITES:
         if site.key == "shackleton":
