@@ -406,3 +406,118 @@ def fetch_lunar_patch(lat: float, lon: float, size_px: int = 500, **kwargs) -> n
     """Elevation-only convenience wrapper around :func:`fetch_patch`."""
     patch = fetch_patch(lat, lon, size_px, **kwargs)
     return None if patch is None else patch.elevation
+
+
+@dataclass(frozen=True)
+class LatitudeBand:
+    """A full-width horizontal slice of a mosaic, to be cut into patches.
+
+    The equirectangular lunar products are *strip*-organised rather than tiled:
+    each block is one full-width scanline (1 x 184,320 for the 59 m merge).  A
+    128-row window therefore costs 128 full-width strips — about 47 MB — no
+    matter how few columns are actually wanted, and issuing hundreds of those
+    concurrently produces truncated range reads.
+
+    Reading the whole band instead costs the same 47 MB and yields on the order
+    of a thousand disjoint patches.  Patches from one band share a latitude, so
+    sampling is stratified by band rather than independent; in exchange every
+    band spans all longitudes, which keeps latitude from confounding a
+    longitude-based train/test split.
+    """
+
+    elevation: np.ndarray
+    latitude: float
+    grid_spacing_y_m: float
+    grid_spacing_x_m: float
+    crs: str | None = None
+    product_key: str | None = None
+    invalid: np.ndarray | None = None
+
+    @property
+    def grid_spacing(self) -> tuple[float, float]:
+        return self.grid_spacing_y_m, self.grid_spacing_x_m
+
+    def patch_at(self, column: int, size_px: int) -> tuple[np.ndarray, float] | None:
+        """Cut one patch, returning it with its nodata fraction, or None."""
+        if column < 0 or column + size_px > self.elevation.shape[1]:
+            return None
+        window = self.elevation[:, column : column + size_px]
+        if window.shape[0] != size_px:
+            return None
+        if self.invalid is None:
+            return window, 0.0
+        bad = self.invalid[:, column : column + size_px]
+        return window, float(bad.mean())
+
+    def longitude_of(self, column: int, size_px: int) -> float:
+        """Selenographic longitude of a patch's centre column."""
+        centre = (column + size_px / 2) / self.elevation.shape[1]
+        return -180.0 + 360.0 * centre
+
+
+def fetch_latitude_band(
+    latitude: float,
+    height_px: int,
+    *,
+    product: DemProduct | str | None = None,
+    timeout_s: int = 120,
+    attempts: int = 3,
+    verbose: bool = True,
+) -> LatitudeBand | None:
+    """Stream one full-width band of a mosaic at a given latitude.
+
+    Retries on truncated reads, which these strip-organised products produce
+    intermittently under load.
+    """
+    if height_px <= 0:
+        raise ValueError("height_px must be positive.")
+    selected = (
+        choose_product(latitude) if product is None
+        else PRODUCTS_BY_KEY[product] if isinstance(product, str)
+        else product
+    )
+    try:
+        import rasterio
+        from rasterio.env import Env
+        from rasterio.windows import Window
+    except ImportError:
+        if verbose:
+            print("rasterio is not installed; run `pip install -r requirements.txt`.")
+        return None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            with Env(GDAL_HTTP_TIMEOUT=timeout_s, GDAL_HTTP_MAX_RETRY=3, VSI_CACHE=True):
+                with rasterio.open(selected.url) as src:
+                    x, y = _project_to_raster(src, 0.0, latitude)
+                    row, _ = src.index(x, y)
+                    top = max(0, min(row - height_px // 2, src.height - height_px))
+                    window = Window(0, top, src.width, height_px)
+                    raw = src.read(1, window=window, masked=True)
+                    data = np.ma.getdata(raw).astype(np.float32)
+                    invalid = np.ma.getmaskarray(raw) | ~np.isfinite(data)
+                    scale = float(src.scales[0]) if src.scales else 1.0
+                    offset = float(src.offsets[0]) if src.offsets else 0.0
+                    if scale != 1.0 or offset != 0.0:
+                        data = data * scale + offset
+                    if invalid.any():
+                        usable = data[~invalid]
+                        data[invalid] = float(np.median(usable)) if usable.size else 0.0
+                    spacing_y, spacing_x = _ground_spacing(src, x, y)
+                    return LatitudeBand(
+                        elevation=data,
+                        latitude=latitude,
+                        grid_spacing_y_m=spacing_y,
+                        grid_spacing_x_m=spacing_x,
+                        crs=str(src.crs) if src.crs else None,
+                        product_key=selected.key,
+                        invalid=invalid,
+                    )
+        except Exception as error:
+            if attempt == attempts:
+                if verbose:
+                    print(f"  band at {latitude:+.1f} failed after {attempts} attempts: {error}")
+                return None
+            if verbose:
+                print(f"  band at {latitude:+.1f} attempt {attempt} failed, retrying")
+    return None
