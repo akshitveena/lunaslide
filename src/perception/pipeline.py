@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from .contracts import GeoReference, VisualEvidence
+from .geospatial import merge_georeference
 from .preprocessing import enhance_lunar_image
 
 
@@ -50,9 +51,14 @@ def run_stage1(
     Model-dependent outputs are included only when their trained checkpoint is
     provided. This prevents a partial installation from being misrepresented as
     an all-clear hazard assessment.
+
+    Any CRS, affine transform, or pixel size the source raster carries is
+    folded into ``georef`` so Stage 3 can align this evidence with Stage 2's
+    hazard grid.  Values the caller supplied explicitly are preserved.
     """
     image_path, output_dir = Path(image_path), Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    georef = merge_georeference(georef, image_path)
     raw = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
     if raw is None:
         raise ValueError(f"Could not read image: {image_path}")
