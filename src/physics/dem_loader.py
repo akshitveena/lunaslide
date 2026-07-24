@@ -398,7 +398,8 @@ def fetch_patch(
             product_key=patch.product_key or "",
         )
     if verbose:
-        print(f"Streamed {patch.elevation.shape} patch at {patch.grid_spacing_m:.1f} m/px.")
+        print(f"Streamed {patch.elevation.shape} patch at "
+              f"{patch.grid_spacing_y_m:.1f} x {patch.grid_spacing_x_m:.1f} m/px.")
     return patch
 
 

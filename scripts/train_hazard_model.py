@@ -248,7 +248,7 @@ def main() -> int:
              f"{frame.band.nunique()} latitude bands. Patches within a band are not "
              f"independent, so leave-one-band-out is the primary evaluation.\n"
              f"{verdict}\n"
-             f"Trained on the nearside alone it collapses to R2 {results[-1]['R2']:.3f} while "
+             f"Trained on the nearside alone it {fell} R2 {results[-1]['R2']:.3f} while "
              f"the linear baseline holds at {results[1]['R2']:.3f} -- a data-sufficiency "
              f"limit, not a model-quality one.  "
              f"generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}",

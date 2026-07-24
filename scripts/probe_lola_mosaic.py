@@ -63,7 +63,8 @@ def main() -> int:
             print(f"  {name:<12} FAILED")
             continue
         elevation = patch.elevation
-        print(f"  {name:<12} {elevation.shape} spacing={patch.grid_spacing_m:.1f} m/px "
+        print(f"  {name:<12} {elevation.shape} "
+              f"spacing={patch.grid_spacing_y_m:.1f}x{patch.grid_spacing_x_m:.1f} m/px "
               f"range=[{elevation.min():.1f}, {elevation.max():.1f}] m "
               f"nodata={patch.nodata_fraction:.1%}")
     return 0
