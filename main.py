@@ -15,7 +15,7 @@ produces and why.
 
     python3 main.py                  # everything
     python3 main.py --skip-figures   # dataset + model only
-    python3 main.py --samples 200    # smaller dataset, faster
+    python3 main.py --bands 12       # smaller dataset, faster
 
 An earlier version of this file built its dataset from synthetic terrain chosen
 by the hazard label it was trying to predict, because the elevation stream
@@ -54,12 +54,13 @@ def run_module(module: str, argv: list[str]) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--samples", type=int, default=500,
-                        help="patches to stream for the dataset")
+    parser.add_argument("--bands", type=int, default=24,
+                        help="latitude bands to stream (each yields many patches)")
+    parser.add_argument("--per-band", type=int, default=20,
+                        help="patches cut from each band")
     parser.add_argument("--size-px", type=int, default=128)
     parser.add_argument("--max-iter", type=int, default=2000,
                         help="CA iteration budget; ~92%% of 128px patches converge by 2000")
-    parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--skip-dataset", action="store_true",
                         help="reuse the existing dataset CSV")
     parser.add_argument("--skip-figures", action="store_true")
@@ -71,10 +72,10 @@ def main() -> int:
     ok = True
     if not args.skip_dataset:
         ok &= run_module("scripts.build_hazard_dataset", [
-            "--samples", str(args.samples),
+            "--bands", str(args.bands),
+            "--per-band", str(args.per_band),
             "--size-px", str(args.size_px),
             "--max-iter", str(args.max_iter),
-            "--workers", str(args.workers),
         ])
     if ok:
         ok &= run_module("scripts.train_hazard_model", [])
