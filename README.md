@@ -29,16 +29,55 @@ This system pushes beyond static hazard mapping. It assumes the lunar surface is
 
 Building an accurate 3D physics engine for lunar gravity required solving complex mathematical anomalies.
 
-### The "Pac-Man" Problem
-During early development, our Cellular Automata avalanche simulation suffered from a severe directional bias bug. Because the grid was updating sequentially (left-to-right, top-to-bottom) rather than synchronously, mass was being moved asymmetrically. 
-This created a visual artifact where avalanches looked like they were being "eaten" diagonally across the screen, earning the nickname the **Pac-Man Bug**. 
+The engine went through three distinct failure modes, each documented with its
+cause, measurement, and fix in [docs/PHYSICS_BUGS.md](docs/PHYSICS_BUGS.md).
 
-**The Fix:**
-We completely rewrote the engine to use **synchronous matrix operations** via NumPy `roll()`. By calculating all directional slopes simultaneously and applying mass conservation checks (ensuring dirt eroded perfectly equaled dirt deposited), we eliminated the Pac-Man artifact. The simulation now perfectly models natural, radial mass wasting down crater walls.
+### The "Pac-Man" Problem
+NumPy's `roll()` is periodic. Using it to shift the terrain and measure slopes
+meant the top edge of the map saw the bottom edge as an adjacent cliff — so the
+crest dumped its material off the "edge" of the world and it reappeared at the
+foot of the slope, like walking off the side of a Pac-Man screen.
+
+**The Fix:** a per-direction boundary mask. If the automaton tries to move mass
+across the edge of the matrix, that flux is set to zero, which acts as a solid
+wall. Verified by `test_a_ramp_stable_in_the_interior_is_left_alone`.
+
+### Directional Bias
+A separate, subtler bug survived that fix. The update swept the four neighbour
+directions in a fixed order and mutated the terrain *between* directions, so
+whichever axis was listed first moved material before the others saw the grid.
+Relaxing a perfectly radially symmetric cone produced a result that changed when
+you rotated the input — a peak asymmetry of **2.71e-2 m**.
+
+**The Fix:** we rewrote the update rule to be genuinely **synchronous**. Every
+directional drop is measured against one frozen snapshot, outflow is distributed
+across downhill directions in proportion to each one's excess above repose, and
+the grid is updated once per iteration. Rotational asymmetry went to **zero,
+bit-exact**, with mass conserved to floating-point precision. The rewrite also
+added a non-inversion limiter — a cell may never end an iteration below a
+neighbour it just fed — which makes the scheme stable at any relaxation factor
+rather than only below `1/connectivity`.
+
+Both properties are locked in by `tests/test_physics_relaxation.py`.
 
 ### Real-World Orbital Scaling
-Our initial physics engine was built on synthetic datasets where 1 pixel = 5 meters. When we ingested the massive NASA USGS topographical data (118 meters per pixel), the engine failed to predict landslides because the massive horizontal distance artificially "flattened" the slope mathematics.
-We recalibrated the physics engine parameters to mathematically account for orbital-scale elevation drops, allowing the Digital Twin to accurately predict catastrophic avalanches on massive structures like the 4.2km-deep Shackleton Crater.
+The engine was developed on synthetic terrain at 5 m/pixel. Real LOLA data is
+118 m/pixel, and at that spacing a cell must drop ~68 m before it exceeds the
+30-degree angle of repose — so orbital-scale terrain reads as far flatter than
+the synthetic test cases, and far less of it fails.
+
+The critical slope is a physical constant, not a tuning knob, so the fix is not
+to recalibrate it. Instead the grid spacing is now read from the source raster
+and carried through `compute_slope` and `simulate_mass_wasting` per patch, so
+the same physics applies correctly at any resolution. Lowering `crit` is
+reserved for what it actually means: a reduced effective friction angle, such as
+regolith shaken by a descent engine.
+
+Patch geometry was corrected at the same time. Windows are requested as a fixed
+number of pixels rather than a fixed span of degrees — one degree of longitude
+is ~30 km at the equator but ~265 m at 89.5° S, so a degree-sized window
+returned wildly different physical areas, worst of all at Shackleton, the
+headline hazard site.
 
 ---
 
