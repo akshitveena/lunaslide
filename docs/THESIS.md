@@ -380,6 +380,29 @@ projected about the pole, where cells stay square. Measured at Shackleton:
 
 ### 5.4 Product registry
 
+Of the three products, only the 5 m south polar DEM is genuinely cloud
+optimized (512 × 512 internal tiles, 8 overview levels). The two equirectangular
+products are served as COGs but are **strip-organised**: each block is one
+full-width scanline — 1 × 184,320 for the 59 m merge. A 128-row window therefore
+costs 128 full-width strips, about 47 MB, however few columns are wanted, and
+issuing hundreds of those concurrently produces truncated range reads:
+
+```
+TIFFReadEncodedStrip: got 14823 bytes, expected 368640   (= 184320 x 2 bytes)
+```
+
+That was losing ~36% of an independently-sampled dataset. Because a strip is
+full-width regardless, reading a whole band costs the same 47 MB and yields
+~1,400 disjoint patches. Retention went from 64% to 100% at roughly 20× less
+data per patch.
+
+The trade-off is that patches from one band share a latitude, so sampling is
+stratified by band rather than independent — which is why §6.4 splits by band.
+In exchange every band spans all longitudes, so both hemispheres draw from
+identical latitudes.
+
+### 5.5 The products are not all Cloud Optimized GeoTIFFs
+
 The loader selects the finest-resolution product covering the requested latitude:
 
 | Key | Product | Resolution | Coverage | Projection |
@@ -471,7 +494,46 @@ Per-site curves are in `figures/ca_vibration_*.png` and
 reduction, **not** as an explicit seismic forcing term; it is a sensitivity
 analysis, not a validated coupled vibro-acoustic model.
 
-### 6.4 The three target sites
+### 6.4 The hazard surrogate
+
+The automaton is expensive — a hazardous 128 px patch needs ~30,000 iterations
+to settle. The surrogate predicts what it *would* produce from terrain
+statistics costing a single pass.
+
+Dataset: 480 patches at 128 px (7.6 km) cut from 24 latitude bands of the 59 m
+LOLA+Kaguya merge, sampled uniform-by-area within ±58°, 96.9% converged within a
+2,000-iteration budget. Target `toppled_fraction` spans 0 → 0.248 with a median
+of 1.5 × 10⁻⁴ — skewed roughly 2,000×.
+
+Patches cut from one band share a latitude and are therefore not independent, so
+the band is the unit of splitting:
+
+| Evaluation | XGBoost | Linear on `unstable_fraction` |
+|---|---|---|
+| **Leave-one-band-out (primary)** | **R² 0.887**, negative in 0/24 | R² 0.695, negative in 3/24 |
+| Nearside → farside transfer | R² 0.630, ρ 0.948 | R² 0.793, ρ 0.868 |
+| Classification (farside) | **macro F1 0.894** | — |
+
+The two evaluations differ, and the difference is the result. Given 23 bands
+spanning all latitudes, the boosted model beats the single-feature baseline by
++0.192 R² and is never negative. Restricted to one hemisphere — half the data,
+narrow longitude range — it drops *below* the linear baseline, which is
+unmoved. Rebuilding at 352 patches instead of 480 drove that same transfer score
+to **−0.379**, confirming the limit is data sufficiency rather than a model
+defect.
+
+Throughout, XGBoost ranks better than it calibrates (ρ 0.948 against R² 0.630 on
+transfer). For ordering candidate landing sites — the operational task — ranking
+is the relevant property; for absolute hazard magnitudes it is not.
+
+This replaces the previously reported macro F1 of 1.00, which was measured on 53
+largely synthetic patches, split randomly, against a target defined by a
+threshold on a feature the model could see, with no baseline to beat.
+
+A caution on statistical power: 24 bands means 24 independent latitude draws,
+not 480 independent samples. Confidence intervals should be computed over bands.
+
+### 6.5 The three target sites
 
 | Site | Product | Cell | Anisotropy | Note |
 |---|---|---|---|---|
@@ -494,12 +556,20 @@ Stated plainly, because several are load-bearing.
    predictions are not empirically confirmed. The Bickel et al. (2020) global
    lunar rockfall catalogue is the dataset that would address this.
 2. **The ML component is a surrogate, not a predictor.** XGBoost was trained to
-   reproduce labels derived from the simulator's own output. The defensible framing
-   is a fast emulator of an expensive simulation, evaluated on a geographic
-   hold-out — not a hazard predictor validated against reality.
-3. **Iteration censoring.** At `max_iter = 500`, hazardous patches do not converge
-   (Section 4.4), right-censoring any iteration-derived feature exactly on the
-   class of interest.
+   reproduce the simulator's own output (§6.4). It is a fast emulator of an
+   expensive simulation, not a hazard predictor validated against reality, and
+   its reported R² of 0.887 measures agreement with the automaton — not with the
+   Moon.
+3. **Iteration censoring — addressed, not eliminated.** At `max_iter = 500`
+   hazardous patches did not converge, right-censoring any iteration-derived
+   feature exactly on the class of interest. The budget is now 2,000 (96.9%
+   converge) and features are evaluated at a fixed budget rather than as a
+   stopping time, but ~3% of patches still stop while relaxing.
+
+9. **Sampling is stratified, not independent.** Patches are cut from shared
+   latitude bands because the equirectangular products are strip-organised
+   (§5.5). 24 bands is 24 independent latitude draws, not 480 independent
+   samples, and statistical power should be judged accordingly.
 4. **Stage 1 is untrained.** No boulder or debris result exists. Only the
    classical enhancement path produces output.
 5. **Stage 3 does not exist.** There is no implemented reasoning layer, no
