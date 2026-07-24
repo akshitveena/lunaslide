@@ -1,3 +1,11 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Streamed DEM patches (see LUNASLIDE_CACHE)
+.cache/
+
+# Trained weights and run artefacts
+checkpoints/
+runs/
+*.pt
