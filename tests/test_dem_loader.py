@@ -13,6 +13,7 @@ import numpy as np
 
 from src.physics.dem_loader import (
     MOON_RADIUS_M,
+    LunarPatch,
     bounds_are_degrees,
     fetch_patch,
     lonlat_to_raster_xy,
@@ -28,6 +29,49 @@ METRE_BOUNDS = (
     np.pi * MOON_RADIUS_M,
     np.pi / 2 * MOON_RADIUS_M,
 )
+
+
+class TestLunarPatch(unittest.TestCase):
+    """Guards the patch's public surface, including the verbose print paths.
+
+    Two AttributeError bugs shipped in ``verbose=True`` f-strings that referred
+    to ``grid_spacing_m`` after it was split into per-axis attributes.  No test
+    exercised the formatting, so the rename passed CI and failed in the user's
+    terminal.  These construct the strings the way the callers do.
+    """
+
+    @staticmethod
+    def _patch(**overrides) -> LunarPatch:
+        defaults = dict(
+            elevation=np.zeros((4, 4), dtype=np.float32),
+            latitude=26.13,
+            longitude=3.63,
+            grid_spacing_y_m=59.2,
+            grid_spacing_x_m=53.2,
+        )
+        defaults.update(overrides)
+        return LunarPatch(**defaults)
+
+    def test_exposes_per_axis_spacing_and_pair(self):
+        patch = self._patch()
+        self.assertEqual(patch.grid_spacing, (59.2, 53.2))
+        self.assertAlmostEqual(patch.anisotropy, 59.2 / 53.2)
+        self.assertFalse(hasattr(patch, "grid_spacing_m"))
+
+    def test_verbose_stream_message_formats(self):
+        patch = self._patch()
+        # The exact expression from fetch_patch's verbose branch.
+        message = (f"Streamed {patch.elevation.shape} patch at "
+                   f"{patch.grid_spacing_y_m:.1f} x {patch.grid_spacing_x_m:.1f} m/px.")
+        self.assertIn("59.2 x 53.2 m/px", message)
+
+    def test_probe_summary_line_formats(self):
+        patch = self._patch(nodata_fraction=0.0)
+        elevation = patch.elevation
+        line = (f"spacing={patch.grid_spacing_y_m:.1f}x{patch.grid_spacing_x_m:.1f} m/px "
+                f"range=[{elevation.min():.1f}, {elevation.max():.1f}] m "
+                f"nodata={patch.nodata_fraction:.1%}")
+        self.assertIn("spacing=59.2x53.2", line)
 
 
 class TestBoundsDetection(unittest.TestCase):
