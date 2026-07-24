@@ -1,6 +1,7 @@
 numpy
 pandas
 scipy
+rasterio
 scikit-learn
 xgboost
 imbalanced-learn
