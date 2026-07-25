@@ -130,6 +130,79 @@ def render_image(
     return {"name": name, "shadow": evidence.shadow_fraction, "texture": evidence.texture_roughness}
 
 
+def render_classical(name: str, image_path: Path, output: Path) -> None:
+    """Dedicated gamma+CLAHE evidence figure carrying the headline numbers.
+
+    The classical enhancer is the pipeline default and the source of the
+    resume's headline Stage 1 metrics; this puts them on one auditable figure
+    rather than only embedded inside comparisons.
+    """
+    if not image_path.exists():
+        print(f"  {name}: missing {image_path}")
+        return
+    raw = _load_gray(image_path)
+    raw_unit = to_unit_gray(raw)
+    enhanced, report = enhance_image(raw)  # classical gamma+CLAHE
+    enhanced_unit = enhanced.astype(np.float32) / 255.0
+
+    fig = plt.figure(figsize=(14, 7.6))
+    grid = fig.add_gridspec(2, 3, height_ratios=[2.4, 1.0], width_ratios=[1, 1, 1],
+                            hspace=0.22, wspace=0.12)
+    fig.suptitle(f"Stage 1 classical enhancement (adaptive gamma + CLAHE) — {name}",
+                 fontsize=14, fontweight="bold", y=0.98)
+
+    ax_raw = fig.add_subplot(grid[0, 0])
+    ax_raw.imshow(raw_unit, cmap="gray", vmin=0, vmax=1)
+    ax_raw.set_title(f"Raw\nmean illumination {raw_unit.mean() * 100:.1f}%", fontsize=10)
+    ax_enh = fig.add_subplot(grid[0, 1])
+    ax_enh.imshow(enhanced_unit, cmap="gray", vmin=0, vmax=1)
+    ax_enh.set_title(f"Enhanced (gamma={report.gamma:.3f} + CLAHE)\n"
+                     f"mean illumination {report.output_mean * 100:.1f}%", fontsize=10)
+    for ax in (ax_raw, ax_enh):
+        ax.set_xticks([]); ax.set_yticks([])
+
+    ax_head = fig.add_subplot(grid[0, 2])
+    ax_head.axis("off")
+    ax_head.text(
+        0.0, 0.98,
+        "Headline metrics\n"
+        "----------------\n"
+        f"adaptive gamma      {report.gamma:.3f}\n"
+        f"mean illumination\n"
+        f"  raw               {report.input_mean * 100:.1f}%\n"
+        f"  enhanced          {report.output_mean * 100:.1f}%\n"
+        f"shadow fraction     {report.shadow_fraction * 100:.1f}%\n\n"
+        "Method\n"
+        "------\n"
+        "1. percentile normalise\n"
+        "2. adaptive gamma:\n"
+        "   mean**g = 0.55\n"
+        "3. CLAHE local contrast",
+        fontsize=10, family="monospace", va="top", transform=ax_head.transAxes,
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="#f4f4f4", edgecolor="#999"))
+
+    ax_hist = fig.add_subplot(grid[1, :])
+    ax_hist.hist((raw_unit * 255).ravel(), bins=64, range=(0, 255), histtype="step",
+                 linewidth=1.8, color="#1f77b4", label=f"raw ({raw_unit.mean()*100:.1f}%)")
+    ax_hist.hist((enhanced_unit * 255).ravel(), bins=64, range=(0, 255), histtype="step",
+                 linewidth=1.8, color="#c1440e", label=f"enhanced ({report.output_mean*100:.1f}%)")
+    ax_hist.axvline(raw_unit.mean() * 255, color="#1f77b4", linestyle="--", linewidth=1.2)
+    ax_hist.axvline(report.output_mean * 255, color="#c1440e", linestyle="--", linewidth=1.2)
+    ax_hist.set_title("Luminance distribution shifts toward well-exposed", fontsize=10)
+    ax_hist.set_xlabel("pixel value"); ax_hist.set_ylabel("count")
+    ax_hist.legend(fontsize=9); ax_hist.grid(alpha=0.3)
+
+    fig.text(0.005, 0.005,
+             f"Real LROC imagery. Deterministic classical pipeline (no training); the pipeline "
+             f"default enhancer.  generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}",
+             fontsize=7.5, family="monospace", color="#333333")
+    fig.subplots_adjust(top=0.90, bottom=0.10)
+    target = output / f"stage1_classical_{name.split()[0].lower()}.png"
+    fig.savefig(target, dpi=140)
+    plt.close(fig)
+    print(f"  {name} (classical): wrote {target}")
+
+
 def render_patch_gallery(
     patch_dir: Path, output: Path, curve_model, device: str, count: int = 6
 ) -> None:
@@ -195,6 +268,7 @@ def main() -> int:
         print("No enhancer checkpoint; showing classical path only.")
 
     args.output.mkdir(parents=True, exist_ok=True)
+    render_classical("Apollo 15 Landing Site", args.apollo15, args.output)
     checkpoint = args.enhancer_checkpoint if curve_model is not None else None
     render_image("Apollo 15 Landing Site", args.apollo15, args.output, curve_model,
                  args.device, enhancer_checkpoint=checkpoint)
