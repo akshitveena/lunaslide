@@ -10,7 +10,7 @@ import numpy as np
 
 from .contracts import GeoReference, VisualEvidence
 from .geospatial import merge_georeference
-from .preprocessing import enhance_lunar_image
+from .prepare import enhance_image
 
 
 def _texture_roughness(image: np.ndarray) -> float:
@@ -64,14 +64,14 @@ def run_stage1(
         raise ValueError(f"Could not read image: {image_path}")
     if raw.ndim == 3:
         raw = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
-    enhanced, report = enhance_lunar_image(raw)
+    # One enhancement step. The learned curve enhancer, when supplied, replaces
+    # classical gamma+CLAHE rather than stacking on top of it, and consumes the
+    # same normalised raw image it was trained on -- see prepare.enhance_image.
+    curve_model = None
     if enhancer_checkpoint:
         import torch
-        runtime = torch.device(device)
-        model = _load_curve_checkpoint(enhancer_checkpoint, runtime)
-        source = torch.from_numpy(enhanced).float().div(255).unsqueeze(0).unsqueeze(0).to(runtime)
-        with torch.inference_mode():
-            enhanced = (model(source)[0][0, 0].cpu().numpy() * 255).round().astype(np.uint8)
+        curve_model = _load_curve_checkpoint(enhancer_checkpoint, torch.device(device))
+    enhanced, report = enhance_image(raw, curve_model, device=device)
     enhanced_path = output_dir / "enhanced.png"
     cv2.imwrite(str(enhanced_path), enhanced)
 

@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .preprocessing import enhance_lunar_image
+from .prepare import enhance_image, to_unit_gray
 
 _EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -23,13 +23,20 @@ def image_paths(directory: str | Path) -> list[Path]:
 
 
 def read_gray(path: Path) -> torch.Tensor:
+    """Enhanced grayscale for the segmenter/detector, matching inference.
+
+    The enhancement here must be the same one the pipeline applies at inference.
+    Default is classical gamma+CLAHE; if a run deploys the learned curve enhancer
+    instead, the segmenter must be retrained with that enhancer to avoid the
+    train/serve skew this module exists to prevent.
+    """
     image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError(f"Could not read image: {path}")
     if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    normalized, _ = enhance_lunar_image(image)
-    return torch.from_numpy(normalized).float().div(255.0).unsqueeze(0)
+    enhanced, _ = enhance_image(image)
+    return torch.from_numpy(enhanced).float().div(255.0).unsqueeze(0)
 
 
 class LowLightImageDataset(Dataset[torch.Tensor]):
@@ -40,11 +47,16 @@ class LowLightImageDataset(Dataset[torch.Tensor]):
         return len(self.paths)
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        # Enhancer input is intentionally normalized but not CLAHE-enhanced.
-        image = cv2.imread(str(self.paths[index]), cv2.IMREAD_GRAYSCALE)
+        # The curve enhancer consumes to_unit_gray(raw) -- the SAME
+        # representation prepare.enhance_image feeds it at inference. Reading
+        # UNCHANGED (not GRAYSCALE) and normalising robustly, rather than the
+        # old naive image/255, is what makes training and serving match.
+        image = cv2.imread(str(self.paths[index]), cv2.IMREAD_UNCHANGED)
         if image is None:
             raise ValueError(f"Could not read {self.paths[index]}")
-        return torch.from_numpy(image).float().div(255.0).unsqueeze(0)
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return torch.from_numpy(to_unit_gray(image)).unsqueeze(0)
 
 
 class DebrisSegmentationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
