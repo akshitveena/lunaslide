@@ -60,27 +60,88 @@ class CurveEnhancer(nn.Module):
 
 
 class SelfGuidedEnhancementLoss(nn.Module):
-    """No-reference objective for unpaired lunar low-light imagery."""
+    """No-reference objective for unpaired lunar low-light imagery.
 
-    def __init__(self, target_exposure: float = 0.55) -> None:
+    A faithful single-channel adaptation of the Zero-DCE losses, with the three
+    calibration errors of the first version corrected:
+
+    * **Exposure** only penalises *under*-exposure (``relu(target - mean)``), and
+      pools with overlap.  The old symmetric ``|mean - target|`` dragged bright
+      detail *down* to mid-grey and, being non-overlapping, stamped a 16-pixel
+      grid into the output.
+    * **Spatial consistency** uses the Zero-DCE region form — it preserves each
+      4x4 region's contrast against its four neighbours — rather than merely
+      matching raw gradient magnitudes, which had produced an embossed look.
+    * **Curve smoothness** (total variation on the curve maps) is weighted to
+      matter.  The old ``5.0`` left the maps ~40x too jagged versus the ~200
+      scale the design needs, which is what actually caused the etching.
+
+    Weights are constructor arguments so they can be tuned without code edits.
+    """
+
+    _NEIGHBOUR_KERNEL = None  # lazily built 4-neighbour difference filter
+
+    def __init__(
+        self,
+        target_exposure: float = 0.6,
+        *,
+        w_exposure: float = 1.0,
+        w_spatial: float = 1.0,
+        w_smoothness: float = 200.0,
+        exposure_patch: int = 16,
+        region_patch: int = 4,
+    ) -> None:
         super().__init__()
         self.target_exposure = target_exposure
+        self.w_exposure = w_exposure
+        self.w_spatial = w_spatial
+        self.w_smoothness = w_smoothness
+        self.exposure_patch = exposure_patch
+        self.region_patch = region_patch
 
     @staticmethod
     def _gradient(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return x[:, :, :, 1:] - x[:, :, :, :-1], x[:, :, 1:, :] - x[:, :, :-1, :]
 
+    def _spatial_consistency(self, source: torch.Tensor, enhanced: torch.Tensor) -> torch.Tensor:
+        """Preserve local contrast: region-to-neighbour differences must match.
+
+        Averages each ``region_patch`` block, then compares how much a block
+        differs from each of its four neighbours in the enhanced image versus
+        the source.  Enhancement may change absolute brightness freely but must
+        keep the *relationships* between neighbouring regions, which is what
+        stops it from flattening or inventing structure.
+        """
+        pool = nn.functional.avg_pool2d
+        s = pool(source, self.region_patch)
+        e = pool(enhanced, self.region_patch)
+        loss = enhanced.new_zeros(())
+        for shift, axis in ((1, 2), (-1, 2), (1, 3), (-1, 3)):
+            ds = s - torch.roll(s, shifts=shift, dims=axis)
+            de = e - torch.roll(e, shifts=shift, dims=axis)
+            loss = loss + (de - ds).pow(2).mean()
+        return loss
+
     def forward(
         self, source: torch.Tensor, enhanced: torch.Tensor, curve_maps: torch.Tensor
     ) -> dict[str, torch.Tensor]:
-        # Local exposure avoids a bright global mean hiding dark regions.
-        local_mean = nn.functional.avg_pool2d(enhanced, kernel_size=16, stride=16)
-        exposure = (local_mean - self.target_exposure).abs().mean()
-        sx, sy = self._gradient(source)
-        ex, ey = self._gradient(enhanced)
-        spatial = (ex.abs() - sx.abs()).abs().mean() + (ey.abs() - sy.abs()).abs().mean()
+        # Exposure: lift dark regions toward the target, never darken bright
+        # ones. Overlapping pooling (stride = patch/2) removes the block grid.
+        stride = max(1, self.exposure_patch // 2)
+        local_mean = nn.functional.avg_pool2d(enhanced, self.exposure_patch, stride)
+        exposure = torch.relu(self.target_exposure - local_mean).mean()
+
+        spatial = self._spatial_consistency(source, enhanced)
+
+        # Illumination smoothness: total variation on the curve maps, squared as
+        # in Zero-DCE's L_tvA. Strong weight keeps the maps smooth so the applied
+        # enhancement does not etch high-frequency artefacts into the surface.
         cx, cy = self._gradient(curve_maps)
-        smoothness = cx.abs().mean() + cy.abs().mean()
-        identity = (enhanced - source).abs().mean()
-        total = 10.0 * exposure + spatial + 5.0 * smoothness + 0.05 * identity
+        smoothness = cx.pow(2).mean() + cy.pow(2).mean()
+
+        total = (
+            self.w_exposure * exposure
+            + self.w_spatial * spatial
+            + self.w_smoothness * smoothness
+        )
         return {"total": total, "exposure": exposure, "spatial": spatial, "smoothness": smoothness}

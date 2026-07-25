@@ -42,6 +42,15 @@ def main() -> int:
     parser.add_argument("--val-fraction", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto")
+    # Defaults chosen empirically on real LROC patches: 8 recursive curve steps
+    # with strong curve smoothness (200) give clean enhancement without etching,
+    # and a 0.5 exposure target lifts shadows without over-amplifying genuinely
+    # low-signal (near-black) regions into their sensor-noise floor.
+    parser.add_argument("--curve-steps", type=int, default=8)
+    parser.add_argument("--target-exposure", type=float, default=0.5)
+    parser.add_argument("--w-exposure", type=float, default=1.0)
+    parser.add_argument("--w-spatial", type=float, default=1.0)
+    parser.add_argument("--w-smoothness", type=float, default=200.0)
     parser.add_argument("--output", type=Path, default=CHECKPOINT)
     parser.add_argument("--figure", type=Path, default=FIGURE)
     args = parser.parse_args()
@@ -77,8 +86,13 @@ def main() -> int:
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_set, batch_size=args.batch_size)
 
-    model = CurveEnhancer().to(device)
-    criterion = SelfGuidedEnhancementLoss().to(device)
+    model = CurveEnhancer(curve_steps=args.curve_steps).to(device)
+    criterion = SelfGuidedEnhancementLoss(
+        target_exposure=args.target_exposure,
+        w_exposure=args.w_exposure,
+        w_spatial=args.w_spatial,
+        w_smoothness=args.w_smoothness,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     def epoch_loss(loader, train: bool) -> dict[str, float]:
@@ -131,7 +145,7 @@ def _render_evidence(args, model, val_set, history, device) -> None:
     from src.perception.enhancement_model import CurveEnhancer
 
     # Reload the best checkpoint for the figure, not the last-epoch weights.
-    best = CurveEnhancer().to(device).eval()
+    best = CurveEnhancer(curve_steps=args.curve_steps).to(device).eval()
     best.load_state_dict(torch.load(args.output, map_location=device)["model"])
 
     examples = min(4, len(val_set))
@@ -158,9 +172,11 @@ def _render_evidence(args, model, val_set, history, device) -> None:
             axes[row, column + 1].set_xticks([]); axes[row, column + 1].set_yticks([])
 
     fig.text(0.005, 0.01,
-             "Self-supervised (no labels): exposure toward 0.55, spatial-consistency, and "
-             "curve-smoothness objectives on unpaired real LROC NAC patches.  "
-             "Left column top: training curve; rows: input vs enhanced on held-out patches.",
+             f"Self-supervised (no labels): under-exposure lift toward {args.target_exposure:g}, "
+             f"Zero-DCE spatial-consistency, and curve-smoothness (w={args.w_smoothness:g}) on "
+             f"unpaired real LROC NAC patches.  Rows: input vs enhanced on held-out patches.\n"
+             "Enhancement is clean where signal exists; a near-black shadowed patch amplifies "
+             "sensor quantisation, the documented limit of enhancing regions with little recorded signal.",
              fontsize=7.5, family="monospace", color="#333333")
     args.figure.parent.mkdir(parents=True, exist_ok=True)
     fig.subplots_adjust(bottom=0.12, top=0.90)
