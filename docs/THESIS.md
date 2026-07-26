@@ -1,7 +1,9 @@
 # Lunaslide: A Predictive Digital Twin for Lunar Landing-Site Slope Stability
 
 **Author:** Akshit Veena
-**Status:** Stage 1 partial, Stage 2 complete and validated, Stage 3 not implemented
+**Status:** Stage 1 partial (enhancers trained, detector proof-of-concept),
+Stage 2 complete and validated, Stage 3 implemented as a rule-based reconciler
+(not yet an LLM agent)
 **Repository:** `lunaslide`
 
 ---
@@ -18,9 +20,12 @@ This work builds a three-stage system to answer that question. Stage 1 extracts
 visual evidence from orbital imagery. Stage 2 — the substantive contribution here —
 is a synchronous cellular-automaton mass-wasting simulator that runs over real
 NASA/USGS lunar elevation data and predicts gravity-driven slope failure, including
-under a reduced effective friction angle representing vibrational load. Stage 3, an
-agentic reasoning layer intended to reconcile the two evidence streams into a
-GO/NO-GO verdict, is specified but **not implemented**.
+under a reduced effective friction angle representing vibrational load. Stage 3
+reconciles the two evidence streams into a GO / CAUTION / NO-GO verdict; it is
+implemented as a transparent **rule-based** reconciler with an epistemic safety
+rule (a site is never certified GO while evidence is missing).  It is not yet an
+LLM agent — the "agentic" layer that would let a model choose which simulations
+to run is future work (Section 8).
 
 The physics engine is validated against three invariants: exact conservation of
 mass, bit-exact rotational isotropy, and convergence to the specified angle of
@@ -93,8 +98,8 @@ in full and identifies the dataset that would address it.
                                                           ▼
                                         ┌──────────────────────────────┐
                                         │ STAGE 3 — Reasoning          │
-                                        │ NOT IMPLEMENTED              │
-                                        │ intended: GO / NO-GO verdict │
+                                        │ rule-based reconciler         │
+                                        │ GO / CAUTION / NO-GO verdict │
                                         └──────────────────────────────┘
 ```
 
@@ -547,6 +552,51 @@ asymmetry of Section 2.
 
 ---
 
+## 6.6 Stage 3 — reconciling perception and physics into a verdict
+
+Stage 3 (`src/reasoning`) is where the two evidence streams finally meet.  For a
+site it takes the Stage 1 `VisualEvidence` (boulder and crater counts, shadow
+fraction, and crucially *which models actually ran*) and a Stage 2 hazard summary
+— slope failure at the quiescent 30° angle of repose and at a 24° angle
+representing descent-engine loading — and returns a GO / CAUTION / NO-GO verdict
+with every contributing signal, conflict, and evidence gap recorded for audit.
+
+It is a **rule-based** reconciler, not an LLM agent.  That is a deliberate
+choice: the decision logic is deterministic and unit-tested (14 tests), which a
+generative verdict is not.  The "agentic" layer that would let a model decide
+which simulations to run is future work (Section 8.1).
+
+Two rules carry the design:
+
+* **The descent-load conflict.** A site stable at rest but which fails badly once
+  the friction angle drops is the exact hazard the three-stage architecture
+  exists to catch.  It is detected from the ratio of the two physics runs and
+  named explicitly.
+* **The epistemic rule.** Absence of evidence is not evidence of safety.  An
+  untrained detector, terrain hidden in shadow, or a non-converged simulation
+  caps the verdict at CAUTION — a site can never be certified GO while it cannot
+  be fully seen.  A gap never masks a genuine NO-GO, however.
+
+Run across the three target sites (`figures/stage3_decisions.png`):
+
+| Site | Slope at repose | Under descent load | Verdict | Why |
+|---|---|---|---|---|
+| Apollo 15 | 1.1% | 9.6% (9×) | CAUTION | vibration conflict + detectors not-run |
+| Shackleton | 0.0% | 0.0% | CAUTION | flat, but no visual evidence possible (PSR) |
+| Faustini | 0.4% | 9.2% (25×) | CAUTION | strong vibration conflict + PSR |
+
+All three are CAUTION, and that is the honest outcome: the boulder and debris
+detectors report `not-run` (the trained detector is a one-frame proof of
+concept, §6.4-adjacent), so no site can be visually cleared for a GO.  Apollo 15
+and Faustini additionally trip the descent-load conflict — stable at rest,
+substantially worse under vibration — which is precisely the signal the system
+was built to surface.
+
+The thresholds are engineering choices, not values calibrated against real
+landing outcomes; none exist in this project.
+
+---
+
 ## 7. Limitations
 
 Stated plainly, because several are load-bearing.
@@ -566,21 +616,26 @@ Stated plainly, because several are load-bearing.
    converge) and features are evaluated at a fixed budget rather than as a
    stopping time, but ~3% of patches still stop while relaxing.
 
-9. **Sampling is stratified, not independent.** Patches are cut from shared
-   latitude bands because the equirectangular products are strip-organised
-   (§5.5). 24 bands is 24 independent latitude draws, not 480 independent
-   samples, and statistical power should be judged accordingly.
-4. **Stage 1 is untrained.** No boulder or debris result exists. Only the
-   classical enhancement path produces output.
-5. **Stage 3 does not exist.** There is no implemented reasoning layer, no
-   conflict resolution, and no GO/NO-GO output. The two upper stages have never
-   exchanged data.
+4. **Stage 1 detection is a proof of concept.** The curve enhancer is trained
+   (§3, and it wins on PSR imagery, §6-adjacent), and a two-class boulder/crater
+   YOLO is trained on 3,866 human-reviewed labels — but only from a *single* NAC
+   frame, so it reaches mAP50 0.21 and its generalisation is untested. Debris
+   segmentation remains untrained. Consequently the detectors report `not-run` in
+   the Stage 3 verdict.
+5. **Stage 3 is rule-based, not agentic.** The reconciler exists and connects the
+   stages (§6.6), but its reasoning is deterministic rules, not an LLM that
+   chooses which simulations to run. The thresholds are uncalibrated engineering
+   choices.
 6. **Vibration is a sensitivity sweep**, not a physical vibro-acoustic model. No
    engine plume, no frequency content, no regolith constitutive model.
 7. **The CA is a relaxation model, not a runout model.** It finds the stable
    configuration; it does not model avalanche velocity, momentum, or travel time.
 8. **Resolution.** Even at 5 m/px, individual boulder-scale failures are
    sub-pixel.
+9. **Sampling is stratified, not independent.** Surrogate patches are cut from
+   shared latitude bands because the equirectangular products are strip-organised
+   (§5.5). 24 bands is 24 independent latitude draws, not 480 independent
+   samples, and statistical power should be judged accordingly.
 
 ---
 
@@ -588,10 +643,16 @@ Stated plainly, because several are load-bearing.
 
 Ordered by ratio of credibility gained to effort spent.
 
-1. **Implement Stage 3.** A rule-based reconciler that loads `VisualEvidence` plus
-   a hazard grid, aligns them via the affine transform, and emits a reasoned
-   verdict. This closes the largest structural gap in the system.
-2. **Supervise against the rockfall catalogue.** Convert Stage 2 from
+1. **Add the agentic layer over Stage 3.** The rule-based reconciler is built
+   (§6.6); the next step is an LLM that reads the evidence and *decides which
+   simulations to run* — e.g. re-run the CA at a lower friction angle to test a
+   moonquake margin — then writes a narrative verdict, with the rule engine as
+   the ground truth it must not contradict. Intended to run on a local model
+   (Ollama or MLX on Apple silicon), keeping the system self-contained.
+2. **Generalise the detector.** Label patches from several NAC frames, not one,
+   and tighten box precision, to move the boulder/crater YOLO beyond a
+   single-frame proof of concept.
+3. **Supervise against the rockfall catalogue.** Convert Stage 2 from
    self-referential to genuinely predictive.
 3. **Fix the censoring**, either by raising `max_iter` until convergence dominates
    or by replacing the iteration count with an uncensored quantity such as residual
@@ -614,12 +675,17 @@ Ordered by ratio of credibility gained to effort spent.
 ```bash
 pip install -r requirements.txt
 
-python3 -m pytest tests/ -q              # 53 tests
-python3 -m scripts.probe_lola_mosaic     # verify the ingestion path
-python3 -m scripts.generate_figures      # site panels + reality check
-python3 -m scripts.generate_ca_visuals   # CA evolution, vibration, 3D
-python3 -m scripts.demo_stage1_apollo15  # Stage 1 enhancement
+python3 -m unittest discover -s tests -t .   # 118 tests, no pytest needed
+python3 -m scripts.probe_lola_mosaic         # verify the ingestion path
+python3 -m scripts.generate_figures          # Stage 2 site panels + reality check
+python3 -m scripts.generate_ca_visuals       # CA evolution, vibration, 3D
+python3 -m scripts.generate_stage1_figures   # Stage 1 enhancement evidence
+python3 -m scripts.run_stage3                # perception + physics -> verdict
 ```
+
+Stage 1 detection and the surrogate need generated data first
+(`scripts.build_lroc_patches`, `scripts.build_hazard_dataset`); see each script's
+`--help`.
 
 Key modules:
 
@@ -628,8 +694,10 @@ Key modules:
 | `src/physics/relaxation.py` | Synchronous CA, `compute_slope` |
 | `src/physics/dem_loader.py` | Product registry, projection-aware streaming |
 | `src/perception/preprocessing.py` | Adaptive gamma + CLAHE |
+| `src/perception/prepare.py` | Single train/serve preprocessing path |
+| `src/perception/boulder_labels.py` | Sun-relief boulder/crater discriminator |
 | `src/perception/contracts.py` | `GeoReference`, `VisualEvidence` |
-| `src/perception/geospatial.py` | Affine/CRS recovery for Stage 3 alignment |
+| `src/reasoning/reconcile.py` | Stage 3 verdict logic |
 | `tests/test_physics_relaxation.py` | The invariants of Section 4.2 |
 
 ---
