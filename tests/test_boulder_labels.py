@@ -9,9 +9,13 @@ import numpy as np
 from src.perception.boulder_labels import (
     Box,
     box_from_mask,
+    classify_relief,
     deduplicate,
+    estimate_sun_vector,
     is_boulder_like,
+    passes_geometry,
     propose_candidates,
+    propose_dark_candidates,
 )
 
 
@@ -76,6 +80,67 @@ class TestIsBoulderLike(unittest.TestCase):
         self.assertTrue(is_boulder_like(mask))
 
 
+class TestSunAndRelief(unittest.TestCase):
+    """The boulder-vs-crater discriminator: shadow geometry against the sun."""
+
+    def _scene(self, boulder: bool) -> tuple[np.ndarray, np.ndarray]:
+        # Sun from the left (+x). A boulder is bright on the sun side (left) with
+        # shadow to the right; a crater is the reverse.
+        img = np.full((64, 64), 110, np.uint8)
+        mask = np.zeros((64, 64), bool)
+        cx, cy = 32, 32
+        yy, xx = np.ogrid[:64, :64]
+        blob = (xx - cx) ** 2 + (yy - cy) ** 2 <= 36
+        mask[blob] = True
+        if boulder:
+            img[:, cx - 10:cx] = 200   # lit cap on sun (left) side
+            img[:, cx:cx + 10] = 30    # shadow on anti-sun (right) side
+        else:
+            img[:, cx - 10:cx] = 30    # near wall shadowed on sun (left) side
+            img[:, cx:cx + 10] = 200   # far wall lit on anti-sun (right) side
+        return img, mask
+
+    def test_sun_vector_points_toward_the_light(self):
+        # Bright left, dark right -> sun is to the left (negative x).
+        img = np.tile(np.linspace(230, 10, 64).astype(np.uint8), (64, 1))
+        sx, sy = estimate_sun_vector(img)
+        self.assertLess(sx, -0.5)
+        self.assertLess(abs(sy), 0.5)
+
+    def test_boulder_classified_as_boulder(self):
+        img, mask = self._scene(boulder=True)
+        self.assertEqual(classify_relief(mask, img, sun_vector=(-1.0, 0.0)), "boulder")
+
+    def test_crater_classified_as_crater(self):
+        img, mask = self._scene(boulder=False)
+        self.assertEqual(classify_relief(mask, img, sun_vector=(-1.0, 0.0)), "crater")
+
+    def test_flat_feature_is_ambiguous(self):
+        img = np.full((64, 64), 120, np.uint8)
+        mask = np.zeros((64, 64), bool); mask[28:36, 28:36] = True
+        self.assertIsNone(classify_relief(mask, img, sun_vector=(-1.0, 0.0)))
+
+
+class TestDarkCandidates(unittest.TestCase):
+    def test_finds_a_dark_pit_on_bright_ground(self):
+        gray = np.full((128, 128), 200, np.uint8)
+        gray[60:66, 60:66] = 20  # dark crater interior
+        points = propose_dark_candidates(gray)
+        self.assertTrue(points)
+        self.assertTrue(any(abs(x - 63) < 6 and abs(y - 63) < 6 for x, y in points))
+
+
+class TestGeometryGate(unittest.TestCase):
+    def test_shared_gate_ignores_photometry(self):
+        # passes_geometry is class-agnostic: a dark compact blob still passes
+        # (crater interiors are dark), unlike the boulder-only is_boulder_like.
+        yy, xx = np.ogrid[:64, :64]
+        disk = (xx - 32) ** 2 + (yy - 32) ** 2 <= 16
+        dark_image = np.full((64, 64), 150, np.uint8); dark_image[disk] = 20
+        self.assertTrue(passes_geometry(disk))
+        self.assertFalse(is_boulder_like(disk, dark_image))  # boulder check rejects dark
+
+
 class TestDeduplicate(unittest.TestCase):
     def test_overlapping_boxes_collapse(self):
         a = Box(0, 0, 10, 10)
@@ -87,6 +152,13 @@ class TestDeduplicate(unittest.TestCase):
     def test_disjoint_boxes_kept(self):
         boxes = [Box(0, 0, 5, 5), Box(20, 20, 25, 25), Box(40, 40, 45, 45)]
         self.assertEqual(len(deduplicate(boxes)), 3)
+
+    def test_cross_class_overlap_collapses_to_one(self):
+        from src.perception.boulder_labels import deduplicate_features
+        # Same feature came back as boulder (0) and crater (1); keep one.
+        feats = [(Box(0, 0, 12, 12), 0), (Box(1, 1, 11, 11), 1), (Box(40, 40, 48, 48), 1)]
+        kept = deduplicate_features(feats)
+        self.assertEqual(len(kept), 2)  # the overlapping pair collapses, far one stays
 
 
 class TestProposeCandidates(unittest.TestCase):
