@@ -86,7 +86,11 @@ class Reviewer:
 
     def _load(self) -> None:
         path = self.images[self.index]
-        self.gray = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        raw = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        # Show the enhanced image the detector saw, not the darker raw patch, so
+        # faint boulders/craters are as visible to the reviewer as to SAM.
+        from src.perception.prepare import enhance_image
+        self.gray, _ = enhance_image(raw)
         self.h, self.w = self.gray.shape
         self.label_path = self.label_dir / f"{path.stem}.txt"
         self.boxes = load_boxes(self.label_path, self.w, self.h)
