@@ -105,7 +105,13 @@ def fetch_coregistered(
 
     elevation = np.ma.getdata(raw_dem).astype(np.float64) * dem_scale
     dem_invalid = np.ma.getmaskarray(raw_dem) | ~np.isfinite(elevation)
-    if dem_invalid.any() and not dem_invalid.all():
+    # The 5 m polar DEM only covers <= -87 deg; off-coverage windows come back
+    # all-nodata (NaN), which must not reach the physics engine.
+    if elevation.size == 0 or float(dem_invalid.mean()) > 0.5:
+        if verbose:
+            print(f"DEM window unusable ({float(dem_invalid.mean()) if elevation.size else 1.0:.0%} nodata).")
+        return None
+    if dem_invalid.any():
         elevation[dem_invalid] = float(np.median(elevation[~dem_invalid]))
 
     return CoRegisteredPatch(
