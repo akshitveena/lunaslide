@@ -135,6 +135,37 @@ class TestCalibratedThresholds(unittest.TestCase):
         self.assertEqual(median.verdict, "GO")
 
 
+class TestDetectorReliabilityGate(unittest.TestCase):
+    """A low-recall detector may flag hazard but may not clear a site."""
+
+    def _clean_visual(self):
+        return VisualEvidence(georef=GeoReference(image_id="t"), shadow_fraction=0.05,
+                              model_versions=dict(COMPLETE_VERSIONS))
+
+    def test_reliable_detector_can_clear(self):
+        d = decide(self._clean_visual(), hazard(nominal=0.0, vibration=0.0),
+                   site_area_km2=1.0, detector_recall=0.8)
+        self.assertEqual(d.verdict, "GO")
+
+    def test_low_recall_detector_cannot_clear(self):
+        # Same clean scene, but the detector recalls too little to trust absence.
+        d = decide(self._clean_visual(), hazard(nominal=0.0, vibration=0.0),
+                   site_area_km2=1.0, detector_recall=0.42)
+        self.assertEqual(d.verdict, "CAUTION")
+        self.assertTrue(any("recall" in g for g in d.evidence_gaps))
+
+    def test_low_recall_detections_still_flag_hazard(self):
+        # A weak detector that DOES find many boulders is still believed for NO-GO.
+        d = decide(visual(boulders=300), hazard(nominal=0.0, vibration=0.0),
+                   site_area_km2=1.0, detector_recall=0.42)
+        self.assertEqual(d.verdict, "NO-GO")
+
+    def test_none_recall_is_backward_compatible(self):
+        d = decide(self._clean_visual(), hazard(nominal=0.0, vibration=0.0),
+                   site_area_km2=1.0)  # no recall passed
+        self.assertEqual(d.verdict, "GO")
+
+
 class TestScoreAndSerialisation(unittest.TestCase):
     def test_hazard_score_in_unit_range(self):
         d = decide(visual(boulders=500), hazard(nominal=0.5, vibration=0.6), site_area_km2=1.0)

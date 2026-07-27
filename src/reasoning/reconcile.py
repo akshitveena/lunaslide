@@ -56,6 +56,11 @@ class DecisionPolicy:
     crater_density_nogo: float = 120.0
     # Fraction of the scene in shadow above which it cannot be visually cleared.
     shadow_unverifiable: float = 0.35
+    # A detector must recall at least this fraction of true features before its
+    # *absence* of detections is trusted to clear a site. Its detections are
+    # counted as hazard regardless; this gate is only about clearance, because a
+    # low-recall detector reporting "nothing here" may simply have missed it.
+    min_recall_to_clear: float = 0.60
 
 
 def _rank(value: Verdict) -> int:
@@ -72,8 +77,16 @@ def decide(
     *,
     site_area_km2: float,
     policy: DecisionPolicy | None = None,
+    detector_recall: float | None = None,
 ) -> LandingDecision:
-    """Weigh visual and physical hazard into a GO / CAUTION / NO-GO verdict."""
+    """Weigh visual and physical hazard into a GO / CAUTION / NO-GO verdict.
+
+    ``detector_recall`` is the validated recall of the boulder detector that
+    produced ``visual``.  If the detector ran but its recall is below
+    ``policy.min_recall_to_clear``, its absence of detections cannot clear the
+    site — that is an evidence gap — though any detections it *did* make still
+    count as hazard.  ``None`` means "trust the detector" (backward compatible).
+    """
     policy = policy or DecisionPolicy()
     signals: dict[str, float] = {}
     conflicts: list[str] = []
@@ -134,6 +147,13 @@ def decide(
     for model in ("boulder_detector", "debris_segmenter"):
         if detector_versions.get(model, "not-run") == "not-run":
             gaps.append(f"{model} did not run — site cannot be visually cleared.")
+    # A detector that ran but recalls too little cannot clear on absence.
+    if (detector_versions.get("boulder_detector", "not-run") != "not-run"
+            and detector_recall is not None
+            and detector_recall < policy.min_recall_to_clear):
+        gaps.append(
+            f"boulder detector recall {detector_recall:.2f} is below the {policy.min_recall_to_clear:.2f} "
+            f"clearance bar — 'no boulders detected' is not trustworthy here.")
     shadow = visual.shadow_fraction
     if shadow is not None:
         signals["shadow_fraction"] = shadow
