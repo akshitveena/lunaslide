@@ -1,9 +1,10 @@
 # Lunaslide: A Predictive Digital Twin for Lunar Landing-Site Slope Stability
 
 **Author:** Akshit Veena
-**Status:** Stage 1 partial (enhancers trained, detector proof-of-concept),
-Stage 2 complete and validated, Stage 3 implemented as a rule-based reconciler
-(not yet an LLM agent)
+**Status:** Stage 1 partial (enhancer trained; boulder/crater detector and debris
+segmenter both trained on real labels, proof-of-concept metrics),
+Stage 2 complete and validated, Stage 3 a rule-based reconciler with an optional
+local-LLM agent layered on top
 **Repository:** `lunaslide`
 
 ---
@@ -150,7 +151,9 @@ weights**, and therefore produce no results:
   COCO label set contains no `boulder` class, and using it would generate
   confident nonsense.
 - **Mask R-CNN** instance refinement (ResNet-50 FPN, two classes).
-- **ResNet-50 U-Net** historical-debris segmenter, trained with BCE + Dice.
+- **ResNet-50 U-Net** debris / mass-wasting segmenter, trained with BCE + Dice
+  on real Bickel et al. (2020) rockfall labels (RMaM-2020), SAM-refined from
+  boxes to pixel masks. Held-out Dice 0.40 (§6.7).
 - **CurveEnhancer**, a ~40K-parameter self-supervised low-light network
   (spatial attention, dilated multi-scale context, exposure/spatial/smoothness
   losses), independently designed rather than a reproduction of any published
@@ -595,6 +598,29 @@ was built to surface.
 The thresholds are engineering choices, not values calibrated against real
 landing outcomes; none exist in this project.
 
+## 6.7 The debris / mass-wasting segmenter
+
+The Stage 1 segmenter is trained on real ground truth rather than anything
+synthetic. Its labels are the human-annotated lunar rockfalls from Bickel et al.
+(2020) — the RMaM-2020 release, the authors' own bounding boxes over NAC tiles.
+A box says *where* a rockfall is but not its shape, so SAM refines each box into
+a pixel mask, and the per-tile union is the binary training target. The physics
+engine plays no part in producing the labels, so there is no circularity: real
+observed features, SAM for geometry only.
+
+The dataset is 660 training tiles (349 with rockfalls, ~311 hard negatives whose
+masks are empty, to hold down false positives) and 17 held-out positive test
+tiles. Debris covers under 1% of pixels, so the objective is BCE (with a positive
+class weight, or the model collapses to predicting nothing) plus Dice.
+
+On the held-out RMaM test tiles the segmenter reaches **Dice 0.40, IoU 0.17,
+pixel precision 0.38, recall 0.24** (`figures/stage1_debris_segmenter.png`). Read
+honestly: it locates a meaningful fraction of real rockfalls and misses more than
+half of them. That is a genuine result on a small, hard, extremely imbalanced
+dataset — a working proof of concept, not an operational detector. The obvious
+next step is more labelled tiles and multi-frame data, the same bottleneck as the
+boulder detector.
+
 ---
 
 ## 7. Limitations
@@ -619,9 +645,11 @@ Stated plainly, because several are load-bearing.
 4. **Stage 1 detection is a proof of concept.** The curve enhancer is trained
    (§3, and it wins on PSR imagery, §6-adjacent), and a two-class boulder/crater
    YOLO is trained on 3,866 human-reviewed labels — but only from a *single* NAC
-   frame, so it reaches mAP50 0.21 and its generalisation is untested. Debris
-   segmentation remains untrained. Consequently the detectors report `not-run` in
-   the Stage 3 verdict.
+   frame, so it reaches mAP50 0.21 and its generalisation is untested. The debris
+   segmenter is now trained on real Bickel rockfall labels (§6.7) but reaches only
+   Dice 0.40 / recall 0.24 on held-out tiles — it finds some mass-wasting features
+   and misses many, on a small dataset. Both remain proofs of concept, so the
+   boulder detector's silence cannot certify a site (the Stage 3 recall gate).
 5. **Stage 3 is rule-based, not agentic.** The reconciler exists and connects the
    stages (§6.6), but its reasoning is deterministic rules, not an LLM that
    chooses which simulations to run. The thresholds are uncalibrated engineering
