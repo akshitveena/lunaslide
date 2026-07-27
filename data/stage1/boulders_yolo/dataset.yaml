@@ -1,0 +1,6 @@
+path: /Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo
+train: train.txt
+val: val.txt
+names:
+  0: boulder
+  1: crater

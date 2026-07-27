@@ -1,0 +1,12 @@
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r256_c1792.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r3584_c768.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r3584_c1792.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r3840_c1280.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r4096_c1024.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r3840_c768.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r4096_c1792.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r0_c512.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r1024_c2048.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r4096_c512.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r4352_c1536.png
+/Users/akshitveena/Projects/lunaslide/data/stage1/boulders_yolo/images/nac_m1417928961lc_r4352_c256.png
