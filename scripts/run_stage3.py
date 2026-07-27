@@ -51,27 +51,46 @@ SITES = (
 )
 
 
-def visual_for(site: Site) -> tuple[VisualEvidence, float]:
-    """Real Stage 1 evidence for the site, honest about what did not run.
+# The trained detector's validated recall (from scripts.train_boulder_detector).
+DETECTOR_CKPT = Path("runs/detect/runs/boulder_crater/weights/best.pt")
+DETECTOR_RECALL = 0.42  # boulder recall on the held-out split
 
-    Apollo 15 has a registered LROC image, so its shadow fraction is measured
-    from real pixels; the boulder/debris detectors report ``not-run`` because no
-    operational checkpoint is wired in here (the one we trained is a one-frame
-    proof of concept).  The polar sites have no visible-light product at all.
+
+def visual_for(site: Site) -> tuple[VisualEvidence, float | None]:
+    """Real Stage 1 evidence for the site, honest about what did and didn't run.
+
+    Apollo 15 has a registered LROC image: its shadow fraction is measured from
+    real pixels, and if the trained detector exists it is actually *run* on the
+    image, so real boulder/crater counts flow into the verdict (with the
+    detector's recall, so Stage 3 knows not to clear on a weak model's silence).
+    The polar sites have no visible-light product, so their detectors honestly
+    report ``not-run``.
     """
     versions = {"enhancer": "classical-gamma-clahe",
                 "boulder_detector": "not-run", "debris_segmenter": "not-run"}
-    apollo_png = Path("data/stage1/apollo15/apollo15.png")
+    boulders: list = []
     shadow = None
+    recall = None
+    apollo_png = Path("data/stage1/apollo15/apollo15.png")
     if site.key == "apollo15" and apollo_png.exists():
         import cv2
+        from src.perception.contracts import BoulderDetection
         from src.perception.prepare import to_unit_gray
         raw = cv2.imread(str(apollo_png), cv2.IMREAD_GRAYSCALE)
         shadow = float(np.mean(to_unit_gray(raw) < 0.12))
+        if DETECTOR_CKPT.is_file():
+            from src.perception.detect import detect_features
+            summary = detect_features(apollo_png, DETECTOR_CKPT, recall=DETECTOR_RECALL)
+            versions["boulder_detector"] = f"{DETECTOR_CKPT} (recall {DETECTOR_RECALL:.2f})"
+            recall = DETECTOR_RECALL
+            boulders = ([BoulderDetection((0, 0, 1, 1), 0.5, "boulder")] * summary.boulders
+                        + [BoulderDetection((0, 0, 1, 1), 0.5, "crater")] * summary.craters)
+            print(f"  detector ran: {summary.boulders} boulders, {summary.craters} craters "
+                  f"across {summary.tiles} tiles", flush=True)
     ev = VisualEvidence(
         georef=GeoReference(image_id=site.key, source="LROC"),
-        shadow_fraction=shadow, model_versions=versions)
-    return ev, 0.0
+        boulders=boulders, shadow_fraction=shadow, model_versions=versions)
+    return ev, recall
 
 
 def main() -> int:
@@ -89,8 +108,8 @@ def main() -> int:
         hazard = summarise_hazard(patch.elevation, patch.grid_spacing, site.name)
         km = patch.elevation.shape[1] * patch.grid_spacing_x_m / 1000.0
         area_km2 = (patch.elevation.shape[0] * patch.grid_spacing_y_m / 1000.0) * km
-        visual, _ = visual_for(site)
-        decision = decide(visual, hazard, site_area_km2=area_km2)
+        visual, recall = visual_for(site)
+        decision = decide(visual, hazard, site_area_km2=area_km2, detector_recall=recall)
         decisions.append({"hazard": hazard.to_dict(), "decision": decision.to_dict()})
         panels.append((site, patch, hazard, decision))
         print(f"  {decision.verdict}  (hazard score {decision.hazard_score}, "
