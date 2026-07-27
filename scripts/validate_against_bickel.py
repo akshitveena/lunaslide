@@ -37,6 +37,7 @@ import numpy as np
 
 CATALOGUE = Path("data/bickel/rockfalls_i80_06.csv")
 OUTPUT_FIG = Path("figures/bickel_validation.png")
+OUTPUT_JSON = Path("data/bickel/validation_raw.json")
 
 
 def hazard_at(lat: float, lon: float, size_px: int, max_iter: int) -> dict | None:
@@ -130,6 +131,21 @@ def main() -> int:
         results[m] = {"case_median": float(np.median(a)), "control_median": float(np.median(b)),
                       "p_value": float(p), "auc": float(auc)}
         print(f"{m:<14}{np.median(a):>18.4f}{np.median(b):>18.4f}{p:>12.2e}{auc:>8.2f}")
+
+    # Persist raw per-site hazard values: these are the empirical basis for
+    # calibrating Stage 3's thresholds against observed mass wasting.
+    import json
+    OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_JSON.write_text(json.dumps({
+        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": "Bickel et al. 2020 rockfall catalogue (doi:10.17617/3.OG927P)",
+        "min_diameter_m": args.min_diam,
+        "size_px": args.size_px,
+        "summary": results,
+        "rockfall_sites": case_rows,
+        "control_sites": control_rows,
+    }, indent=2) + "\n")
+    print(f"Raw per-site hazard -> {OUTPUT_JSON}")
 
     best = max(results, key=lambda m: results[m]["auc"])
     verdict = (
