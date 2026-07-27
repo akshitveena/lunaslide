@@ -105,6 +105,36 @@ class TestEvidenceGaps(unittest.TestCase):
         self.assertEqual(d.verdict, "NO-GO")
 
 
+class TestCalibratedThresholds(unittest.TestCase):
+    """Pin the data-derived thresholds so a silent revert to guesses fails.
+
+    Values come from scripts/calibrate_stage3.py: p90/p99 of the hazard
+    distribution over 480 real DEM patches, confirmed against observed Bickel
+    rockfall sites (6.4x / 8.0x enrichment over random terrain).
+    """
+
+    def test_slope_thresholds_are_the_calibrated_values(self):
+        policy = DecisionPolicy()
+        self.assertAlmostEqual(policy.slope_caution, 0.0090, places=4)
+        self.assertAlmostEqual(policy.slope_nogo, 0.0658, places=4)
+
+    def test_thresholds_are_ordered_and_plausible(self):
+        policy = DecisionPolicy()
+        self.assertLess(policy.slope_caution, policy.slope_nogo)
+        self.assertLess(policy.slope_nogo, policy.vibration_vibration_nogo)
+        for value in (policy.slope_caution, policy.slope_nogo,
+                      policy.vibration_vibration_nogo, policy.shadow_unverifiable):
+            self.assertTrue(0.0 < value < 1.0)
+
+    def test_terrain_at_the_population_median_is_cleared(self):
+        # Median lunar terrain (~1.8e-4 failure) must not trip CAUTION on slope.
+        visual = VisualEvidence(georef=GeoReference(image_id="t"), shadow_fraction=0.05,
+                                model_versions=dict(COMPLETE_VERSIONS))
+        median = decide(visual, hazard(nominal=0.00018, vibration=0.0007),
+                        site_area_km2=1.0)
+        self.assertEqual(median.verdict, "GO")
+
+
 class TestScoreAndSerialisation(unittest.TestCase):
     def test_hazard_score_in_unit_range(self):
         d = decide(visual(boulders=500), hazard(nominal=0.5, vibration=0.6), site_area_km2=1.0)
