@@ -24,16 +24,32 @@ from .contracts import LandingDecision, Stage2Hazard, Verdict
 
 @dataclass(frozen=True)
 class DecisionPolicy:
-    """Thresholds governing the verdict.  Engineering choices, not calibrated."""
+    """Thresholds governing the verdict.
 
-    # Slope failure (fraction of cells shedding material at repose).
-    slope_caution: float = 0.02
-    slope_nogo: float = 0.10
+    The slope and vibration levels are **calibrated against real lunar data**
+    (``scripts/calibrate_stage3.py``): each is a percentile of the hazard
+    distribution over 480 area-uniform DEM patches, then checked against the
+    Bickel et al. (2020) catalogue to confirm that terrain where rockfalls were
+    actually *observed* crosses it far more often than random terrain does.
+
+    Calibration is to terrain and observed mass wasting, **not to landing
+    outcomes** — no such dataset exists. These are risk-screening levels, not
+    certified safety limits.
+    """
+
+    # Slope failure at repose. p90 / p99 of real lunar terrain; observed
+    # rockfall sites exceed them 6.4x / 8.0x more often than random controls.
+    slope_caution: float = 0.0090
+    slope_nogo: float = 0.0658
     # Descent-engine vibration: a site stable now but that fails badly under a
-    # lowered friction angle is a moonquake/landing-load conflict.
+    # lowered friction angle is a moonquake/landing-load conflict. The NO-GO
+    # level is p95 of random terrain under load (6.3x rockfall enrichment).
     vibration_ratio_caution: float = 3.0
     vibration_vibration_nogo: float = 0.15   # failure fraction under load
-    # Feature density, per square kilometre.
+    # Feature density, per square kilometre. NOT calibrated: the detector is a
+    # single-frame proof of concept, so no trustworthy density distribution
+    # exists yet. These remain engineering choices and are documented as such
+    # rather than given false precision.
     boulder_density_caution: float = 50.0
     boulder_density_nogo: float = 200.0
     crater_density_caution: float = 30.0
