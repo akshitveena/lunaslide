@@ -15,3 +15,8 @@ data/stage1/lroc_patches/
 data/stage1/shadowcam_patches/
 data/stage3/
 data/bickel/
+
+# RMaM-2020 download + derived debris image/mask tiles (metrics.json is kept)
+data/rmam/
+data/stage1/debris/train/
+data/stage1/debris/val/

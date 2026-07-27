@@ -1,0 +1,14 @@
+{
+  "generated_utc": "2026-07-27T19:02:19+00:00",
+  "source": "RMaM-2020 (Bickel et al.) lunar rockfall labels; SAM-refined masks",
+  "checkpoint": "runs/segment/debris_segmenter.pt",
+  "train_tiles": 660,
+  "val_tiles": 17,
+  "best": {
+    "dice": 0.396680643251267,
+    "iou": 0.1738092870637367,
+    "pixel_precision": 0.38366988586479367,
+    "pixel_recall": 0.24113670851151883,
+    "epoch": 17
+  }
+}
